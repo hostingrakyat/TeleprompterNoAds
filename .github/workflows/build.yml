@@ -36,16 +36,18 @@ jobs:
       - name: Install dependencies
         run: flutter pub get 2>&1 | tee -a build_output.log
 
-      - name: Configure signing (if keystore secret present)
+      - name: Configure signing
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        shell: bash
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Keystore secret found - configuring signed release."
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "Keystore secret found - signing with your upload key (Play-ready)."
             echo "$KEYSTORE_BASE64" | base64 -d > android/upload-key.jks
             {
               echo "storeFile=upload-key.jks"
@@ -53,10 +55,23 @@ jobs:
               echo "keyPassword=$KEY_PASSWORD"
               echo "keyAlias=$KEY_ALIAS"
             } > android/key.properties
-            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "signed=upload-key" >> "$GITHUB_OUTPUT"
           else
-            echo "No keystore secret - building UNSIGNED release."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No keystore secret - generating an ephemeral release key so the APK installs."
+            GEN_PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24)
+            keytool -genkeypair \
+              -alias upload \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storetype JKS -keystore android/upload-key.jks \
+              -storepass "$GEN_PASS" -keypass "$GEN_PASS" \
+              -dname "CN=Riovan Styx Roring, OU=365 Days App Challenge, O=Independent, L=Balikpapan, ST=Kalimantan, C=ID"
+            {
+              echo "storeFile=upload-key.jks"
+              echo "storePassword=$GEN_PASS"
+              echo "keyPassword=$GEN_PASS"
+              echo "keyAlias=upload"
+            } > android/key.properties
+            echo "signed=ephemeral" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build APK (release)
@@ -102,7 +117,7 @@ jobs:
           body: |
             Teleprompter No Ads - free, offline camera teleprompter. No ads, forever.
 
-            Signed: ${{ steps.signing.outputs.signed }}
+            Signing: ${{ steps.signing.outputs.signed }}
 
             - `TeleprompterNoAds-release.apk` - install on Android (sideload)
             - `TeleprompterNoAds-release.aab` - for Play Store upload
