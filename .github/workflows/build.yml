@@ -66,9 +66,18 @@ jobs:
 
       - name: Rename artifacts
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk \
-             dist/TeleprompterNoAds-release.apk
+          # The release APK may be named app-release.apk (signed) or
+          # app-release-unsigned.apk (no keystore). Pick whichever exists.
+          APK=$(find build/app/outputs -name 'app-release*.apk' | head -n1)
+          if [ -z "$APK" ]; then
+            echo "No release APK found!" >&2
+            find build/app/outputs -name '*.apk' || true
+            exit 1
+          fi
+          echo "Using APK: $APK"
+          cp "$APK" dist/TeleprompterNoAds-release.apk
           cp build/app/outputs/bundle/release/app-release.aab \
              dist/TeleprompterNoAds-release.aab
 
