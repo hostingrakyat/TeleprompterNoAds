@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build:
@@ -33,7 +34,7 @@ jobs:
         run: flutter --version
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get 2>&1 | tee -a build_output.log
 
       - name: Configure signing (if keystore secret present)
         id: signing
@@ -59,10 +60,16 @@ jobs:
           fi
 
       - name: Build APK (release)
-        run: flutter build apk --release
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee -a build_output.log
 
       - name: Build App Bundle (release)
-        run: flutter build appbundle --release
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build appbundle --release 2>&1 | tee -a build_output.log
 
       - name: Rename artifacts
         run: |
@@ -111,8 +118,25 @@ jobs:
         with:
           name: build-log
           path: |
+            build_output.log
             build/app/outputs/
             build/**/*.log
             android/app/build/outputs/logs/
           retention-days: 5
           if-no-files-found: ignore
+
+      - name: Report failure to issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let log = '(no log captured)';
+            try { log = fs.readFileSync('build_output.log', 'utf8'); } catch (e) {}
+            const tail = log.length > 10000 ? log.slice(-10000) : log;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CI build failed — run ${context.runNumber}`,
+              body: '<details><summary>build_output.log (tail)</summary>\n\n```\n' + tail + '\n```\n\n</details>'
+            });
